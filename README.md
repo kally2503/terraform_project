@@ -1,384 +1,238 @@
-# AWS Production Infrastructure - Demo Guide
+# 🚀 AWS Production Infrastructure — Terraform
 
-## �️ Dedicated Infrastructure Repository
+> Production-grade 2-tier AWS infrastructure built with Terraform.  
+> Covers VPC, ALB, Auto Scaling Group, NAT Gateway, Security Groups, S3, and EC2 (Nginx).
 
-This repository follows the **Infrastructure as Code (IaC)** best practice of "Separation of Concerns". It is strictly dedicated to managing the AWS platform resources.
+---
 
-### 🔄 CI/CD Workflow (Infrastructure Only)
-This repository uses a dedicated GitHub Actions workflow (`.github/workflows/terraform.yml`) that:
-1.  **Plans** changes on Pull Requests (with Security & Linting checks).
-2.  **Applies** changes to `dev`, `test`, or `prod` environments based on the branch.
+## 📁 Repository Structure
 
-### 🤝 Integration with Application Code
-In a real-world scenario, this repository would interface with a separate **Application Repository**:
-1.  **App Repo:** Builds the application and creates an AMI (Amazon Machine Image).
-2.  **Infra Repo (This one):** Receives the new `ami_id` and performs a rolling update of the Auto Scaling Group.
-
-*Note: For demonstration purposes, this repo currently uses a `user_data.sh` script to bootstrap Nginx, simulating the application layer.*
-
-## �🎯 Overview
-
-This demo guide walks you through deploying a production-grade 2-tier AWS infrastructure using Terraform. The infrastructure includes:
-
-- **VPC** with public and private subnets across multiple AZs
-- **Application Load Balancer** for traffic distribution
-- **Auto Scaling Group** with dynamic scaling policies
-- **NAT Gateway** for secure private subnet internet access
-- **Security Groups** with proper network isolation
-- **S3 Bucket** for static assets and logs
-- **EC2 instances** running Nginx web servers
-
-## 📋 Prerequisites
-
-Before starting this demo, ensure you have:
-
-1. **Terraform** (>= 1.0) installed
-   ```bash
-   terraform version
-   ```
-
-2. **AWS CLI** configured with credentials
-   ```bash
-   aws configure
-   # Enter your AWS Access Key ID, Secret Access Key, and default region
-   ```
-
-3. **IAM Permissions** - Your AWS user needs permissions to create:
-   - VPC, Subnets, Internet Gateway, NAT Gateway
-   - EC2 instances, Auto Scaling Groups, Launch Templates
-   - Application Load Balancer, Target Groups
-   - Security Groups, Network ACLs
-   - S3 Buckets
-   - Elastic IPs
-
-4. **AWS Account** with sufficient service quotas for the region
-
-## 🏗️ Architecture Components
-
-### Network Layer
-- **VPC**: `10.0.0.0/16` CIDR block
-- **Public Subnets**: `10.0.1.0/24`, `10.0.2.0/24` (AZ-a, AZ-b)
-- **Private Subnets**: `10.0.11.0/24`, `10.0.12.0/24` (AZ-a, AZ-b)
-- **Internet Gateway**: For public subnet internet access
-- **NAT Gateway**: For private subnet outbound internet access
-
-### Compute Layer
-- **Auto Scaling Group**: 2-6 instances based on CPU utilization
-- **Launch Template**: Ubuntu-based EC2 instances with Nginx
-- **Instance Type**: t2.micro (configurable)
-
-### Load Balancing
-- **Application Load Balancer**: Distributes traffic across healthy instances
-- **Target Group**: Health checks on port 80
-- **Listener**: HTTP on port 80
-
-### Storage
-- **S3 Bucket**: For application assets and ALB logs
-
-## 🚀 Step-by-Step Demo
-
-### Step 1: Clone and Navigate
-
-```bash
-# If not already in the directory
-cd /home/baivab/repos/Terraform-Full-Course-Aws/lessons/day20/code
+```
+.
+├── README.md
+├── task.md
+└── code/
+    ├── DEMO.md
+    ├── main.tf
+    ├── vpc.tf
+    ├── alb.tf
+    ├── asg.tf
+    ├── s3.tf
+    ├── security_groups.tf
+    ├── backend.tf
+    ├── variables.tf
+    ├── outputs.tf
+    ├── dev.tfvars
+    ├── test.tfvars
+    ├── prod.tfvars
+    └── scripts/
+        └── user_data.sh
 ```
 
-### Step 2: Review Configuration Files
+| File | Purpose |
+|---|---|
+| `main.tf` | Provider config and root module |
+| `vpc.tf` | VPC, subnets, IGW, NAT Gateway, route tables |
+| `alb.tf` | Application Load Balancer, target group, listener |
+| `asg.tf` | Auto Scaling Group and launch template |
+| `s3.tf` | S3 bucket for assets and ALB logs |
+| `security_groups.tf` | Security group rules for ALB and EC2 |
+| `backend.tf` | Remote state backend configuration |
+| `variables.tf` | Input variable declarations |
+| `outputs.tf` | Output values (ALB DNS, VPC ID, subnet IDs) |
+| `dev.tfvars` | Variable values for dev environment |
+| `test.tfvars` | Variable values for test environment |
+| `prod.tfvars` | Variable values for prod environment |
+| `scripts/user_data.sh` | EC2 bootstrap script — installs and starts Nginx |
+
+---
+
+## 🏗️ Architecture Overview
+
+| Layer | Component | Detail |
+|---|---|---|
+| **Network** | VPC | `10.0.0.0/16` across 2 AZs |
+| | Public Subnets | `10.0.1.0/24`, `10.0.2.0/24` |
+| | Private Subnets | `10.0.11.0/24`, `10.0.12.0/24` |
+| | NAT Gateway | Outbound access for private subnets |
+| **Compute** | Auto Scaling Group | 2–6 instances, CPU-based scaling |
+| | Launch Template | Ubuntu + Nginx (`t2.micro`) |
+| **Traffic** | Application Load Balancer | HTTP :80, health checks |
+| **Storage** | S3 Bucket | Assets and ALB logs |
+
+---
+
+## ✅ Prerequisites
+
+- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.0
+- AWS CLI configured (`aws configure`)
+- IAM permissions for: VPC, EC2, ASG, ALB, S3, EIP
+
+---
+
+## 🚦 Getting Started
+
+### 1. Clone the repository
 
 ```bash
-# View the main configuration
-cat main.tf
-
-# Check variables and their default values
-cat variables.tf
-
-# See what outputs will be displayed
-cat outputs.tf
+git clone https://github.com/<your-username>/<repo-name>.git
+cd <repo-name>/code
 ```
 
-### Step 3: (Optional) Customize Variables
-
-Create a `terraform.tfvars` file to override defaults:
-
-```bash
-cat > terraform.tfvars << EOF
-region      = "us-east-1"
-environment = "demo"
-instance_type = "t2.micro"
-min_size    = 2
-max_size    = 4
-desired_capacity = 2
-EOF
-```
-
-### Step 4: Initialize Terraform
+### 2. Initialise
 
 ```bash
 terraform init
 ```
 
-**Expected Output:**
-- Downloads AWS and Random providers
-- Initializes backend
-- Shows "Terraform has been successfully initialized!"
-
-### Step 5: Validate Configuration
+### 3. Validate
 
 ```bash
 terraform validate
+# Expected: Success! The configuration is valid.
 ```
 
-**Expected Output:** `Success! The configuration is valid.`
-
-### Step 6: Plan the Deployment
+### 4. Plan — target environment
 
 ```bash
-terraform plan -out=tfplan
+# Dev
+terraform plan -var-file="dev.tfvars" -out=tfplan
+
+# Test
+terraform plan -var-file="test.tfvars" -out=tfplan
+
+# Prod
+terraform plan -var-file="prod.tfvars" -out=tfplan
 ```
 
-**What to Look For:**
-- Total resources to be created (~30-35 resources)
-- VPC, subnets, and networking components
-- Security groups and rules
-- Load balancer and target group
-- Auto Scaling Group and launch template
-- S3 bucket configuration
+> Expect ~30–35 resources to be created.
 
-### Step 7: Apply the Configuration
+### 5. Apply
 
 ```bash
 terraform apply tfplan
+# Duration: ~5–7 minutes
 ```
 
-**Duration:** Approximately 5-7 minutes
-
-**What's Happening:**
-1. VPC and networking setup (1 min)
-2. Security groups creation (30 sec)
-3. NAT Gateway allocation (2 min)
-4. Load balancer provisioning (2 min)
-5. Auto Scaling Group launch (1-2 min)
-6. S3 bucket creation (10 sec)
-
-### Step 8: Verify Outputs
-
-After successful apply, you'll see:
-
-```
-Outputs:
-
-load_balancer_dns = "app-lb-123456789.us-east-1.elb.amazonaws.com"
-s3_bucket_name = "my-app-bucket-xxxxx"
-vpc_id = "vpc-xxxxxxxxxxxxx"
-public_subnet_ids = ["subnet-xxxxx", "subnet-yyyyy"]
-private_subnet_ids = ["subnet-zzzzz", "subnet-aaaaa"]
-```
-
-### Step 9: Test the Application
+### 6. Test
 
 ```bash
-# Get the load balancer DNS
 ALB_DNS=$(terraform output -raw load_balancer_dns)
-
-# Wait for instances to become healthy (2-3 minutes)
-echo "Waiting for instances to be ready..."
-sleep 180
-
-# Test the application
+sleep 180  # wait for instances to become healthy
 curl http://$ALB_DNS
 ```
 
-**Expected Output:**
+Expected response:
 ```html
 <h1>Welcome to the AWS Infrastructure Project - Proper 2-Tier Architecture (Ubuntu)</h1>
 ```
 
-### Step 10: Test in Browser
+---
 
+## 🔍 Verify Deployment
+
+**Auto Scaling Group instances**
 ```bash
-echo "Access your application at: http://$ALB_DNS"
-```
-
-Open the URL in your browser to see the Nginx welcome page.
-
-## 🔍 Verification Steps
-
-### Check Auto Scaling Group
-
-```bash
-# List EC2 instances in the ASG
 aws autoscaling describe-auto-scaling-groups \
-  --query "AutoScalingGroups[?contains(AutoScalingGroupName, 'app-asg')].Instances[*].[InstanceId, HealthStatus, AvailabilityZone]" \
+  --query "AutoScalingGroups[?contains(AutoScalingGroupName, 'app-asg')].Instances[*].[InstanceId,HealthStatus,AvailabilityZone]" \
   --output table
 ```
 
-### Check Load Balancer Health
-
+**Load Balancer target health**
 ```bash
-# Get target group ARN
 TG_ARN=$(aws elbv2 describe-target-groups \
   --query "TargetGroups[?contains(TargetGroupName, 'app-tg')].TargetGroupArn" \
   --output text)
-
-# Check target health
 aws elbv2 describe-target-health --target-group-arn $TG_ARN
 ```
 
-### Monitor S3 Bucket
-
+**VPC and subnets**
 ```bash
-# List S3 bucket
-S3_BUCKET=$(terraform output -raw s3_bucket_name)
-aws s3 ls s3://$S3_BUCKET/
-```
-
-### Check VPC Resources
-
-```bash
-# View VPC details
 VPC_ID=$(terraform output -raw vpc_id)
-aws ec2 describe-vpcs --vpc-ids $VPC_ID
-
-# View subnets
-aws ec2 describe-subnets --filters "Name=vpc-id,Values=$VPC_ID" --query "Subnets[*].[SubnetId,CidrBlock,AvailabilityZone,MapPublicIpOnLaunch]" --output table
+aws ec2 describe-subnets \
+  --filters "Name=vpc-id,Values=$VPC_ID" \
+  --query "Subnets[*].[SubnetId,CidrBlock,AvailabilityZone,MapPublicIpOnLaunch]" \
+  --output table
 ```
 
-## 🧪 Testing Auto Scaling
+---
 
-### Trigger Scale-Up Event
+## 🧹 Teardown
 
 ```bash
-# Generate load on the application (requires Apache Bench)
-sudo apt-get install -y apache2-utils
-ab -n 10000 -c 100 http://$ALB_DNS/
-
-# Watch for new instances
-watch -n 10 'aws autoscaling describe-auto-scaling-groups --query "AutoScalingGroups[?contains(AutoScalingGroupName, '\''app-asg'\'')].{Desired:DesiredCapacity,Current:length(Instances),Min:MinSize,Max:MaxSize}" --output table'
+terraform destroy -var-file="dev.tfvars"
+# Type 'yes' when prompted — takes ~5–7 minutes
+# Note: NAT Gateway deletion can take 3–5 minutes
 ```
 
-### Monitor Scaling Activity
-
+Confirm cleanup:
 ```bash
-# View scaling activities
-aws autoscaling describe-scaling-activities \
-  --auto-scaling-group-name $(aws autoscaling describe-auto-scaling-groups --query "AutoScalingGroups[?contains(AutoScalingGroupName, 'app-asg')].AutoScalingGroupName" --output text) \
-  --max-records 5
+aws ec2 describe-vpcs \
+  --filters "Name=tag:Project,Values=AWS-Production-Infrastructure"
 ```
 
-## 📊 Cost Estimation
+---
 
-**Approximate monthly costs (us-east-1):**
-- EC2 (t2.micro × 2): ~$15
-- ALB: ~$20
-- NAT Gateway: ~$35
-- Data transfer: ~$10
-- S3: <$1
-- **Total: ~$80/month**
+## 💰 Estimated Cost
 
-**Demo costs:** If destroyed within 1 hour: ~$0.15
+| Resource | Monthly |
+|---|---|
+| EC2 t2.micro × 2 | ~$15 |
+| ALB | ~$20 |
+| NAT Gateway | ~$35 |
+| Data transfer + S3 | ~$11 |
+| **Total** | **~$80/month** |
 
-## 🧹 Cleanup
+> **Demo cost** (destroyed within 1 hour): ~$0.15
 
-### Step 1: View Resources to be Destroyed
-
-```bash
-terraform plan -destroy
-```
-
-### Step 2: Destroy Infrastructure
-
-```bash
-terraform destroy
-```
-
-Type `yes` when prompted.
-
-**Duration:** Approximately 5-7 minutes
-
-**Note:** NAT Gateway can take 3-5 minutes to fully delete.
-
-### Step 3: Verify Cleanup
-
-```bash
-# Check if resources are deleted
-aws ec2 describe-vpcs --filters "Name=tag:Project,Values=AWS-Production-Infrastructure"
-```
+---
 
 ## 🐛 Troubleshooting
 
-### Issue: Instances Not Healthy
-
-**Solution:**
+**Instances not healthy**
 ```bash
-# Check security group rules
-aws ec2 describe-security-groups --filters "Name=tag:Project,Values=AWS-Production-Infrastructure"
+aws ec2 describe-security-groups \
+  --filters "Name=tag:Project,Values=AWS-Production-Infrastructure"
 
-# Verify user data script execution
-# SSH into instance (if key pair configured) and check:
+# Check Nginx on instance
 sudo systemctl status nginx
 sudo tail -f /var/log/cloud-init-output.log
 ```
 
-### Issue: ALB Returns 503
-
-**Possible Causes:**
-- Instances still launching (wait 3-5 minutes)
-- Security group blocking traffic
-- Health check failing
-
-**Solution:**
+**ALB returning 503** — wait 3–5 minutes, then check target health:
 ```bash
-# Check target health
-TG_ARN=$(aws elbv2 describe-target-groups --query "TargetGroups[0].TargetGroupArn" --output text)
+TG_ARN=$(aws elbv2 describe-target-groups \
+  --query "TargetGroups[0].TargetGroupArn" --output text)
 aws elbv2 describe-target-health --target-group-arn $TG_ARN
 ```
 
-### Issue: Terraform Apply Fails
-
-**Solution:**
+**Apply fails — verify credentials and quotas**
 ```bash
-# Check AWS credentials
 aws sts get-caller-identity
-
-# Verify quotas
-aws service-quotas get-service-quota --service-code ec2 --quota-code L-1216C47A
-
-# Review detailed error
-terraform apply -refresh=true
+aws service-quotas get-service-quota \
+  --service-code ec2 --quota-code L-1216C47A
 ```
-
-### Issue: NAT Gateway Costs
-
-**Solution:** For demo purposes, you can skip NAT Gateway by:
-- Comment out NAT Gateway in `vpc.tf`
-- Place instances in public subnets (not recommended for production)
-
-## 📝 Key Learning Points
-
-1. **Infrastructure as Code:** All resources defined declaratively
-2. **High Availability:** Multi-AZ deployment ensures fault tolerance
-3. **Auto Scaling:** Dynamic capacity based on demand
-4. **Security:** Network isolation with public/private subnets
-5. **Load Balancing:** Traffic distribution and health monitoring
-6. **State Management:** Terraform tracks infrastructure state
-
-## 🔗 Additional Resources
-
-- [Terraform AWS Provider Docs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
-- [AWS VPC Best Practices](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-best-practices.html)
-- [Auto Scaling Documentation](https://docs.aws.amazon.com/autoscaling/ec2/userguide/what-is-amazon-ec2-auto-scaling.html)
-
-## 📧 Support
-
-For issues or questions, please check:
-- AWS CloudWatch logs for runtime errors
-- Terraform state: `terraform show`
-- AWS Console for resource status
 
 ---
 
-**Demo Duration:** 15-20 minutes (including deployment and testing)
-**Difficulty Level:** Intermediate
-**Last Updated:** November 2025
-- Modify the `variables.tf` file to customize the configuration as needed.
+## 🔑 Key Learning Points
+
+- **Infrastructure as Code** — all resources declared, versioned, and reproducible
+- **Multi-environment** — separate tfvars for dev / test / prod with identical code
+- **High Availability** — multi-AZ deployment with automatic failover
+- **Auto Scaling** — capacity adjusts dynamically to CPU demand
+- **Network Isolation** — public/private subnet split with NAT Gateway
+- **Load Balancing** — traffic distribution with built-in health monitoring
+- **State Management** — remote backend tracks infrastructure state
+
+---
+
+## 📚 References
+
+- [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+- [AWS VPC Best Practices](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-best-practices.html)
+- [EC2 Auto Scaling](https://docs.aws.amazon.com/autoscaling/ec2/userguide/what-is-amazon-ec2-auto-scaling.html)
+
+---
+
+> **Demo duration:** 15–20 min &nbsp;|&nbsp; **Level:** Intermediate &nbsp;|&nbsp; **Updated:** May 2026

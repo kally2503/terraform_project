@@ -1,7 +1,6 @@
 Terraform Environment Setup
 ## What to Do
 
-- [ ] Watch the Day 27 video and take notes
 - [ ] Deploy production-grade AWS infrastructure with CI/CD pipeline
 - [ ] Set up GitHub Actions workflow for automated deployments
 - [ ] Test the infrastructure deployment pipeline
